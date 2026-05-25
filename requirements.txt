@@ -1,0 +1,12 @@
+# Core scraping (fetchers + stealth browser)
+scrapling[fetchers]>=0.4.8
+
+# CAPTCHA OCR (Oracle APEX image captcha - 5 caracteres)
+ddddocr>=1.5.0
+Pillow>=10.0.0
+
+# Validação do Excel exportado
+openpyxl>=3.1.0
+
+# Opcional: API 2Captcha (CAPTCHA_MODE=api + CAPTCHA_API_KEY)
+requests>=2.31.0
