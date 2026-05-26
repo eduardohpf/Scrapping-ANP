@@ -1,5 +1,5 @@
-"""Scraper ANP CDP - Bases de Distribuição e TRR Autorizados."""
+"""Scraper ANP CDP — múltiplas pipelines de dados públicos."""
 
-from anp_scraper.scraper import AnpDistributionScraper
+from anp_scraper.scraper import AnpDistributionScraper, AnpScraper, ScrapeResult
 
-__all__ = ["AnpDistributionScraper"]
+__all__ = ["AnpDistributionScraper", "AnpScraper", "ScrapeResult"]

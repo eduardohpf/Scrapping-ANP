@@ -11,6 +11,12 @@ from anp_scraper.exceptions import ValidationError
 log = logging.getLogger(__name__)
 
 MIN_XLSX_BYTES = 1024
+LARGE_FILE_BYTES = 5 * 1024 * 1024
+SAMPLE_MAX_ROWS = 100
+
+
+def _row_has_data(row: tuple) -> bool:
+    return any(cell is not None and str(cell).strip() != "" for cell in row)
 
 
 def validate_export_file(path: Path) -> dict:
@@ -32,29 +38,42 @@ def validate_export_file(path: Path) -> dict:
         raise ValidationError(f"Extensão inesperada {suffix!r} em {path}")
 
     try:
-        wb = load_workbook(path, data_only=True)
+        read_only = size > LARGE_FILE_BYTES
+        wb = load_workbook(path, read_only=read_only, data_only=True)
         ws = wb.active
-        # Alguns exports APEX não populam max_row em read_only; contar linhas reais
         row_count = 0
         col_count = 0
+        scanned = 0
+
         for row in ws.iter_rows(values_only=True):
-            if any(cell is not None and str(cell).strip() != "" for cell in row):
+            scanned += 1
+            if _row_has_data(row):
                 row_count += 1
                 col_count = max(col_count, len(row))
+            if read_only and row_count >= 2 and scanned >= SAMPLE_MAX_ROWS:
+                break
+
         wb.close()
-        rows, cols = row_count, col_count
     except Exception as exc:
         raise ValidationError(f"Não foi possível ler Excel: {path}") from exc
 
-    if rows < 2:
-        raise ValidationError(f"Planilha sem dados suficientes (linhas={rows})")
+    if row_count < 2:
+        raise ValidationError(f"Planilha sem dados suficientes (linhas={row_count})")
 
-    meta = {"path": str(path), "size_bytes": size, "rows": rows, "columns": cols}
+    meta: dict = {
+        "path": str(path),
+        "size_bytes": size,
+        "rows": row_count if not read_only else None,
+        "columns": col_count,
+    }
+    if read_only:
+        meta["rows_note"] = f"amostra_{SAMPLE_MAX_ROWS}_linhas_arquivo_grande"
+
     log.info(
-        "Exportação validada: %s (%s bytes, %sx%s)",
+        "Exportação validada: %s (%s bytes, linhas=%s, colunas=%s)",
         path.name,
         size,
-        rows,
-        cols,
+        meta["rows"] if meta["rows"] is not None else "n/a(grande)",
+        col_count,
     )
     return meta

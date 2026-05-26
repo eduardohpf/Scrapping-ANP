@@ -3,12 +3,10 @@ Resolução do CAPTCHA Oracle APEX (imagem) da ANP.
 
 Estratégia anti-CAPTCHA (em ordem de prioridade):
 1. Scrapling StealthySession (patchright): reduz detecção de automação no portal.
-   O site NÃO usa Cloudflare Turnstile; solve_cloudflare permanece desligado.
-2. OCR local (ddddocr): o plugin ANP exibe 5 imagens (5 caracteres). Concatenamos
-   OCR por segmento e, se necessário, OCR da área completa #anp_p25_captcha.
-3. Retry: botão de refresh do CAPTCHA + nova leitura até max_captcha_attempts.
-4. Modo manual (headless=False): aguarda digitação humana no campo #P25_CAPTCHA.
-5. Opcional: API 2Captcha (CAPTCHA_API_KEY) para CAPTCHA de imagem via base64.
+2. OCR local (ddddocr): 5 imagens / 5 caracteres por consulta.
+3. Retry: botão de refresh do CAPTCHA + nova leitura.
+4. Modo manual (headless=False): digitação humana.
+5. Opcional: API 2Captcha.
 """
 from __future__ import annotations
 
@@ -18,6 +16,9 @@ import re
 from typing import TYPE_CHECKING, Protocol
 
 import ddddocr
+
+from anp_scraper.pipelines.distribuicao_glp import SELECTORS as DEFAULT_SELECTORS
+from anp_scraper.pipelines.spec import PageSelectors
 
 if TYPE_CHECKING:
     from patchright.sync_api import Page as SyncPage
@@ -50,10 +51,10 @@ class DdddOcrCaptchaSolver:
             log.debug("OCR falhou em um segmento: %s", exc)
             return ""
 
-    def solve_sync(self, page: SyncPage) -> str:
-        page.locator("#anp_p25_captcha img").first.wait_for(state="visible", timeout=30_000)
+    def solve_sync(self, page: SyncPage, selectors: PageSelectors = DEFAULT_SELECTORS) -> str:
+        page.locator(selectors.captcha_images).first.wait_for(state="visible", timeout=30_000)
         parts: list[str] = []
-        imgs = page.locator("#anp_p25_captcha img")
+        imgs = page.locator(selectors.captcha_images)
         for i in range(imgs.count()):
             parts.append(self._classify(imgs.nth(i).screenshot()))
 
@@ -62,14 +63,18 @@ class DdddOcrCaptchaSolver:
             log.debug("CAPTCHA OCR (segmentos): %r", combined[:5])
             return combined[:5]
 
-        full = self._classify(page.locator("#anp_p25_captcha").screenshot())
+        full = self._classify(page.locator(selectors.captcha_container).screenshot())
         log.debug("CAPTCHA OCR (área completa): %r", full)
         return full
 
-    async def solve_async(self, page: AsyncPage) -> str:
-        await page.locator("#anp_p25_captcha img").first.wait_for(state="visible", timeout=30_000)
+    async def solve_async(
+        self,
+        page: AsyncPage,
+        selectors: PageSelectors = DEFAULT_SELECTORS,
+    ) -> str:
+        await page.locator(selectors.captcha_images).first.wait_for(state="visible", timeout=30_000)
         parts: list[str] = []
-        imgs = page.locator("#anp_p25_captcha img")
+        imgs = page.locator(selectors.captcha_images)
         count = await imgs.count()
         for i in range(count):
             png = await imgs.nth(i).screenshot()
@@ -80,20 +85,21 @@ class DdddOcrCaptchaSolver:
             log.debug("CAPTCHA OCR (segmentos): %r", combined[:5])
             return combined[:5]
 
-        full_png = await page.locator("#anp_p25_captcha").screenshot()
+        full_png = await page.locator(selectors.captcha_container).screenshot()
         full = self._classify(full_png)
         log.debug("CAPTCHA OCR (área completa): %r", full)
         return full
 
 
 class TwoCaptchaSolver:
-    """Fallback via API 2Captcha (image captcha). Requer pacote requests e API key."""
+    """Fallback via API 2Captcha (image captcha)."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, selectors: PageSelectors = DEFAULT_SELECTORS) -> None:
         self.api_key = api_key
+        self.selectors = selectors
 
     def _fetch_image_b64(self, page: SyncPage) -> str:
-        png = page.locator("#anp_p25_captcha").screenshot()
+        png = page.locator(self.selectors.captcha_container).screenshot()
         return base64.b64encode(png).decode()
 
     def solve_sync(self, page: SyncPage) -> str:
@@ -133,18 +139,23 @@ class TwoCaptchaSolver:
         raise TimeoutError("2Captcha timeout")
 
 
-def wait_manual_captcha_sync(page: SyncPage, timeout_ms: int = 300_000) -> str:
+def wait_manual_captcha_sync(
+    page: SyncPage,
+    selectors: PageSelectors = DEFAULT_SELECTORS,
+    timeout_ms: int = 300_000,
+) -> str:
     """Aguarda o usuário preencher o CAPTCHA manualmente (modo headful)."""
     log.warning(
         "Modo manual: preencha o CAPTCHA no navegador (timeout %ss)...",
         timeout_ms // 1000,
     )
-    page.locator("#P25_CAPTCHA").click()
+    page.locator(selectors.captcha_input).click()
     page.wait_for_function(
-        """() => {
-            const el = document.querySelector('#P25_CAPTCHA');
+        """(sel) => {
+            const el = document.querySelector(sel);
             return el && el.value && el.value.trim().length >= 4;
         }""",
+        arg=selectors.captcha_input,
         timeout=timeout_ms,
     )
-    return page.locator("#P25_CAPTCHA").input_value().strip()[:5]
+    return page.locator(selectors.captcha_input).input_value().strip()[:5]

@@ -1,43 +1,50 @@
-# Scraper ANP CDP — Bases de Distribuição (Liquefeitos)
+# Scraper ANP CDP
 
-Automatiza a consulta pública da ANP, preenche o filtro **BASES DO RAMO DE LIQUEFEITOS**, resolve o CAPTCHA de imagem e exporta via **Exportar c/ todos os participantes**.
+Automatiza consultas públicas no [CDP da ANP](https://cdp.anp.gov.br/ords/r/cdp_apex/consulta-dados-publicos-cdp/home): resolve CAPTCHA de imagem Oracle APEX e exporta planilhas Excel.
 
-Portal: [Base de Distribuição e TRR Autorizados](https://cdp.anp.gov.br/ords/r/cdp_apex/consulta-dados-publicos-cdp/base-de-distribuição-e-trr-autorizados-lista)
+## Pipelines
+
+| Pipeline | Descrição | Comando |
+|----------|-----------|---------|
+| `br_anp_distribuicao_glp` (padrão) | Bases do ramo de liquefeitos | `python main.py` |
+| `br_anp_posto_combustivel_revendedor` | Postos revendedores — exportar com tancagem | `python main.py --pipeline br_anp_posto_combustivel_revendedor` |
+
+### Fluxo `br_anp_distribuicao_glp`
+
+Acesso direto à lista, filtro **BASES DO RAMO DE LIQUEFEITOS**, botão **Exportar c/ todos os participantes**.
+
+### Fluxo `br_anp_posto_combustivel_revendedor`
+
+1. Home CDP → menu **SIMP** → **Consulta de Postos**
+2. Filtro **POSTO REVENDEDOR** → CAPTCHA → **Exportar Com Tancagem**
 
 ## Estratégia anti-CAPTCHA
 
 | Camada | Ferramenta | Função |
 |--------|------------|--------|
-| Navegação stealth | **Scrapling** `StealthySession` (patchright) | Reduz sinais de automação; `solve_cloudflare=False` (site não usa Cloudflare) |
-| CAPTCHA | **ddddocr** (padrão) | OCR das 5 imagens do plugin Oracle APEX (`#anp_p25_captcha`) |
-| Retry | Refresh APEX | Até 8 tentativas com nova imagem |
-| Fallback manual | `--no-headless --captcha-mode manual` | Usuário digita o código no browser |
-| Fallback API | `CAPTCHA_MODE=api` + `CAPTCHA_API_KEY` | 2Captcha para imagem base64 |
-
-O Scrapling **não resolve** este CAPTCHA nativamente (`solve_cloudflare` cobre apenas Cloudflare Turnstile). A automação combina StealthySession + OCR dedicado.
+| Navegação stealth | **Scrapling** `StealthySession` | patchright + flags anti-fingerprint |
+| CAPTCHA | **ddddocr** (padrão) | OCR das 5 imagens por consulta |
+| Retry | Refresh APEX | Até 8 tentativas |
+| Fallback manual | `--no-headless --captcha-mode manual` | Digitação humana |
+| Fallback API | `CAPTCHA_MODE=api` + `CAPTCHA_API_KEY` | 2Captcha |
 
 ## Estrutura do projeto
 
 ```
 anp_scraper/
-  config.py       # URL, seletores APEX, parâmetros
-  captcha.py      # OCR / manual / 2Captcha
-  automation.py   # Preenchimento, export, retries
-  scraper.py      # Orquestração Scrapling
-  validators.py   # Validação do .xlsx
-main.py           # CLI
+  pipelines/          # Specs por pipeline (URL, seletores, filtros)
+  automation/       # Automação compartilhada + específica por pipeline
+  captcha.py          # OCR / manual / 2Captcha (seletores parametrizados)
+  config.py           # ScraperConfig
+  scraper.py          # Orquestração Scrapling
+  validators.py       # Validação do .xlsx
+main.py               # CLI (--pipeline)
 ```
-
-## Dependências
-
-- Python 3.10+
-- Pacotes em `requirements.txt`
-- Browsers Scrapling: `scrapling install`
 
 ## Instalação e execução
 
 ```powershell
-cd "c:\Users\eduar\OneDrive\Documentos\Teste Scrapling"
+cd "c:\Users\eduar\OneDrive\Documentos\Scraping ANP"
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -46,21 +53,17 @@ pip install -r requirements.txt
 scrapling install
 
 python main.py
+python main.py --pipeline br_anp_posto_combustivel_revendedor
 ```
 
 ### Opções úteis
 
 ```powershell
-# Ver o navegador e digitar CAPTCHA manualmente
 python main.py --no-headless --captcha-mode manual
-
-# Pasta de download customizada
 python main.py --download-dir .\output\meus_dados
-
-# Logs detalhados
 python main.py --log-level DEBUG
 
-# 2Captcha (variáveis de ambiente)
+$env:ANP_PIPELINE = "br_anp_posto_combustivel_revendedor"
 $env:CAPTCHA_MODE = "api"
 $env:CAPTCHA_API_KEY = "sua_chave"
 python main.py
@@ -68,18 +71,9 @@ python main.py
 
 ## Saída esperada
 
-- Arquivo Excel em `output/downloads/` (nome sugerido pelo servidor, ex. `exportação.xlsx`)
-- Validação: tamanho mínimo, leitura via openpyxl, contagem de linhas/colunas
-
-## Seletores estáveis (Oracle APEX P25)
-
-| Elemento | Seletor |
-|----------|---------|
-| Tipo de Instalação | `#P25_QUALIFICACAO` |
-| CAPTCHA (imagens) | `#anp_p25_captcha img` |
-| Entrada CAPTCHA | `#P25_CAPTCHA` |
-| Refresh CAPTCHA | `#spn_captchaanp_refresh_anp_p25_captcha` |
-| Exportar c/ participantes | `#B479395808106517986` |
+- `br_anp_distribuicao_glp`: `output/downloads/` (ex. `exportação.xlsx`)
+- `br_anp_posto_combustivel_revendedor`: `output/downloads/br_anp_posto_combustivel_revendedor/`
+- Validação via openpyxl (tamanho, linhas, colunas)
 
 ## Aviso legal
 

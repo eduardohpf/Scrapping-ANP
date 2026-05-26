@@ -1,42 +1,41 @@
-"""Configurações e seletores estáveis da página Oracle APEX."""
+"""Configurações de execução do scraper ANP."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# URL oficial da consulta pública ANP/CDP
-TARGET_URL = (
-    "https://cdp.anp.gov.br/ords/r/cdp_apex/"
-    "consulta-dados-publicos-cdp/base-de-distribuição-e-trr-autorizados-lista"
+from anp_scraper.pipelines import DEFAULT_PIPELINE, get_pipeline
+from anp_scraper.pipelines.distribuicao_glp import (
+    INSTALLATION_TYPE_LABEL,
+    INSTALLATION_TYPE_VALUE,
+    SELECTORS,
+    TARGET_URL,
 )
 
-# Texto exato exibido no dropdown (site usa "BASES", não "BASE")
-INSTALLATION_TYPE_LABEL = "BASES DO RAMO DE LIQUEFEITOS"
-INSTALLATION_TYPE_VALUE = "3"
-
-# Seletores APEX (IDs estáveis no page item P25)
-SELECTORS = {
-    "installation_type": "#P25_QUALIFICACAO",
-    "captcha_container": "#anp_p25_captcha",
-    "captcha_images": "#anp_p25_captcha img",
-    "captcha_input": "#P25_CAPTCHA",
-    "captcha_refresh": "#spn_captchaanp_refresh_anp_p25_captcha",
-    "export_all_participants": "#B479395808106517986",
+# Retrocompatibilidade com imports e documentação existentes
+SELECTORS_LEGACY = {
+    "installation_type": SELECTORS.primary_filter,
+    "captcha_container": SELECTORS.captcha_container,
+    "captcha_images": SELECTORS.captcha_images,
+    "captcha_input": SELECTORS.captcha_input,
+    "captcha_refresh": SELECTORS.captcha_refresh,
+    "export_all_participants": SELECTORS.export_button,
     "search_button": "#B430320450206705029",
-    "apex_error": ".a-Notification-message, .t-Alert-body, .a-Form-error:visible",
+    "apex_error": SELECTORS.apex_error,
 }
 
-DEFAULT_DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "output" / "downloads"
+DEFAULT_DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / "output" / "downloads"
 
 
 @dataclass
 class ScraperConfig:
     """Parâmetros de execução do scraper."""
 
-    url: str = TARGET_URL
+    pipeline: str = DEFAULT_PIPELINE
+    url: str | None = None
     installation_label: str = INSTALLATION_TYPE_LABEL
     installation_value: str = INSTALLATION_TYPE_VALUE
-    download_dir: Path = field(default_factory=lambda: DEFAULT_DOWNLOAD_DIR)
+    download_dir: Path | None = None
     headless: bool = True
     max_captcha_attempts: int = 8
     page_timeout_ms: int = 120_000
@@ -47,3 +46,21 @@ class ScraperConfig:
     solve_cloudflare: bool = False
     real_chrome: bool = False
     log_level: str = "INFO"
+
+    def resolved_download_dir(self) -> Path:
+        if self.download_dir is not None:
+            return self.download_dir
+        # Mantém pasta plana para a pipeline original (compatibilidade)
+        if self.pipeline == DEFAULT_PIPELINE:
+            return DEFAULT_DOWNLOAD_ROOT
+        return DEFAULT_DOWNLOAD_ROOT / self.pipeline
+
+    def resolved_url(self) -> str:
+        if self.url is not None:
+            return self.url
+        return get_pipeline(self.pipeline).url
+
+    @property
+    def download_dir_effective(self) -> Path:
+        """Diretório efetivo (cria subpasta por pipeline se não customizado)."""
+        return self.resolved_download_dir()
